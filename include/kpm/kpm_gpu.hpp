@@ -46,6 +46,7 @@ struct GpuBenchResult {
   double min_s = 0.0;
   double max_s = 0.0;
   int n_reps = 0;
+  std::vector<double> reps_s; // per-rep device seconds, run order
 };
 
 /// Timed repetitions of the full moment loop (R vectors x n_cheb moments,
@@ -57,11 +58,18 @@ GpuBenchResult bench_moment_loop_fp64(const CsrMatrix& H, const KpmParams& p,
 GpuBenchResult bench_moment_loop_fp32(const CsrMatrix& H, const KpmParams& p,
                                       GpuKernelMode mode, int n_reps);
 
-/// STREAM-like triad c = a + s*b in FP64 with arrays far larger than L2
-/// (512 MiB each). Returns the median effective GB/s; per-rep min/max are
-/// written through the out-params. This is the roofline reference — the
-/// spec sheet number is never used.
-double bench_triad_fp64(double& min_gbps, double& max_gbps, int n_reps);
+/// STREAM-like triad result: c = a + s*b in FP64 with arrays far larger
+/// than L2 (512 MiB each). This is the roofline reference — the spec sheet
+/// number is never used.
+struct TriadBenchResult {
+  double median_gbps = 0.0;
+  double min_gbps = 0.0;
+  double max_gbps = 0.0;
+  int n_reps = 0;
+  std::vector<double> reps_gbps; // per-rep effective GB/s, run order
+};
+
+TriadBenchResult bench_triad_fp64(int n_reps);
 
 /// Analytic global-memory traffic per Chebyshev moment per random vector,
 /// in bytes (algorithmic minimum; small lattices may be served from L2 in
@@ -69,7 +77,29 @@ double bench_triad_fp64(double& min_gbps, double& max_gbps, int n_reps);
 double naive_bytes_per_moment(int nnz, int n, int real_bytes);
 double fused_bytes_per_moment(int nnz, int n, int real_bytes);
 
+/// Device properties plus driver/runtime versions, for benchmark metadata.
+/// Clock rates are the device-reported maxima, not live measurements.
+struct GpuDeviceInfo {
+  std::string name;
+  int major = 0;            // compute capability
+  int minor = 0;
+  int sm_count = 0;
+  int clock_rate_khz = 0;        // prop.clockRate (max graphics clock)
+  int memory_clock_rate_khz = 0; // prop.memoryClockRate
+  int memory_bus_width_bits = 0;
+  int l2_bytes = 0;
+  std::uint64_t global_mem_bytes = 0;
+  int driver_version = 0;  // cudaDriverGetVersion, e.g. 13020
+  int runtime_version = 0; // cudaRuntimeGetVersion
+};
+
+GpuDeviceInfo gpu_device_info();
+
 /// CUDA device name, for report headers.
 std::string gpu_device_name();
+
+/// Build toolchain of the GPU library: nvcc version, host compiler,
+/// C++ standard, build type.
+std::string gpu_toolchain();
 
 } // namespace kpm

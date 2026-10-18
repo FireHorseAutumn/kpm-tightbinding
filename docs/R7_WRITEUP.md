@@ -39,7 +39,7 @@ host.
 |---|---|---|
 | Exact diagonalization | Trace, bipartite symmetry, analytic minimum eigenvalue | Trace and symmetry near machine precision; L=14 minimum-eigenvalue error `4.1e-14` |
 | CPU KPM | DOS normalization and exact-diagonalization histogram | Integral error `3.9e-7`; matched-histogram L1 distance `0.1953` within the stochastic-noise bound |
-| Naive/fused GPU | Same seed and recurrence as the CPU implementation | FP64 moments agree to `1.1e-16`; FP32 moments are within `1.9e-6` of the FP64 reference |
+| Naive/fused GPU | Same seed and recurrence as the CPU implementation | FP64 moments agree to `1.1e-16` at L=14 and `3.3e-16` at multi-block L=17; benchmark-class grids L=128/L=256 agree to `6.6e-14` at reduced moment counts; FP32 moments are within `1.9e-6` of the FP64 reference |
 | HIP compile | Hipified kernels with `hipcc 7.1.1`, `gfx942` | Clean compile; runtime results are discussed separately below |
 
 The tolerances and negative-result rules are in [`README.md`](../README.md) and
@@ -72,23 +72,24 @@ they do not identify which memory level serves the traffic.
 The test machine has an NVIDIA GeForce RTX 5060 Laptop GPU (`sm_120`, 26 SMs,
 32 MiB L2). The sweep uses 1000 moments, R=4, device-side timing, and 11
 repetitions per point. The measured STREAM-like FP64 triad baseline is
-269.4 GB/s, median [268.7, 269.5] over 20 repetitions.
+347.9 GB/s, median [346.9, 348.8] over 20 repetitions.
 
 Two reporting defects were found during preparation of this report: min/max was
 read after sorting the timing vector, and an earlier naive-traffic expression
 charged for a nonexistent `t(n)` read. Both are fixed in the source. The values
-below come from the corrected 2026-10-17 JSON.
+below come from the 2026-10-18 JSON, which also records per-repetition raw
+timings and device/driver/seed/toolchain metadata.
 
 FP64 microseconds per Chebyshev moment, median [min,max]:
 
 | L | N | naive | fused | naive/fused median-time ratio |
 |--:|--:|--:|--:|--:|
-| 16 | 256 | 8.18 [8.08, 8.31] | 5.46 [5.42, 5.50] | 1.50x |
-| 32 | 1024 | 8.19 [8.11, 8.30] | 5.46 [5.43, 5.54] | 1.50x |
-| 64 | 4096 | 8.23 [8.20, 8.33] | 5.51 [5.49, 5.54] | 1.49x |
-| 128 | 16384 | 8.13 [8.07, 8.19] | 6.91 [6.89, 6.91] | 1.18x |
-| 256 | 65536 | 19.27 [19.01, 19.29] | 23.06 [17.68, 23.14] | 0.84x |
-| 512 | 262144 | 87.73 [81.42, 117.84] | 88.23 [82.10, 91.39] | 0.99x |
+| 16 | 256 | 7.28 [7.10, 7.74] | 4.82 [4.78, 4.84] | 1.51x |
+| 32 | 1024 | 7.19 [7.10, 7.25] | 4.81 [4.80, 5.01] | 1.49x |
+| 64 | 4096 | 7.24 [7.18, 7.26] | 4.82 [4.80, 4.85] | 1.50x |
+| 128 | 16384 | 7.35 [7.34, 7.44] | 6.58 [6.58, 6.58] | 1.12x |
+| 256 | 65536 | 17.39 [17.38, 17.40] | 16.21 [16.21, 17.06] | 1.07x |
+| 512 | 262144 | 55.15 [55.14, 55.17] | 54.14 [54.05, 54.19] | 1.02x |
 
 Brackets contain the per-mode minimum and maximum across 11 repetitions, not
 confidence intervals. The ratio is computed from the two medians. Complete
@@ -96,8 +97,8 @@ FP32/FP64 data are in [`data/kpm_gpu_bench.json`](../data/kpm_gpu_bench.json).
 
 ![Naive versus fused scaling and measured roofline position](../data/kpm_gpu_scaling.png)
 
-At L=512, fused FP32 takes 55.48 [54.95, 57.38] microseconds, compared with
-88.23 [82.10, 91.39] for FP64. The ratio is 1.59 rather than the factor of two
+At L=512, fused FP32 takes 35.44 [35.44, 35.45] microseconds, compared with
+54.14 [54.05, 54.19] for FP64. The ratio is 1.53 rather than the factor of two
 suggested by byte width alone.
 
 ### Launch and latency effects
@@ -109,17 +110,18 @@ reduced launch count, not a DRAM-bandwidth ratio.
 
 ### Cache and run-to-run variation
 
-The L=256 reversal and its wide fused spread are kept in the table rather than
-averaged away. Naive FP64 effective bandwidth is 322.4 GB/s at L=512, 120% of
-the measured triad, and 366.6 GB/s at L=256, 136% of triad. Effective bandwidth
+Naive FP64 effective bandwidth is 512.9 GB/s at L=512, 147% of
+the measured triad, and 406.3 GB/s at L=256, 117% of triad. Effective bandwidth
 here is the analytic byte count divided by measured time. Values above the
 streaming baseline are consistent with an L2-served component, but hardware
 counters are needed to confirm that attribution.
 
-A previous same-day sweep produced different absolute timings and large-size
-ratios. Laptop power and clock state are therefore material caveats. Controlled
-repeated runs are needed before treating the large-size ratios as a stable
-distribution.
+The previous same-day sweep showed an L=256 reversal (0.84x, kept in project
+history) and wide large-size spreads; this sweep shows 1.07x at L=256 with
+tight spreads, while a cold-start repeat showed small-size moment times roughly
+4x higher with the triad unchanged. Laptop power and clock state are therefore
+material caveats. Controlled repeated runs are needed before treating the
+large-size ratios as a stable distribution.
 
 The algorithmic traffic reduction does not determine the wall-clock ratio. The
 memory level serving the traffic, launch overhead, and machine state all affect

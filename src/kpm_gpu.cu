@@ -275,8 +275,9 @@ kpm::GpuBenchResult bench_impl(const kpm::CsrMatrix& H,
   times.reserve(n_reps);
   for (int rep = 0; rep < n_reps; ++rep)
     times.push_back(runner.run(mode).seconds);
-  std::sort(times.begin(), times.end());
   kpm::GpuBenchResult res;
+  res.reps_s = times;
+  std::sort(times.begin(), times.end());
   res.median_s = times[times.size() / 2];
   res.min_s = times.front();
   res.max_s = times.back();
@@ -309,7 +310,7 @@ GpuBenchResult bench_moment_loop_fp32(const CsrMatrix& H, const KpmParams& p,
   return bench_impl<float>(H, p, mode, n_reps);
 }
 
-double bench_triad_fp64(double& min_gbps, double& max_gbps, int n_reps) {
+TriadBenchResult bench_triad_fp64(int n_reps) {
   const size_t n = size_t{64} << 20; // 64M doubles = 512 MiB per array
   double *a = nullptr, *b = nullptr, *c = nullptr;
   KPM_CUDA_CHECK(cudaMalloc(&a, sizeof(double) * n));
@@ -322,8 +323,9 @@ double bench_triad_fp64(double& min_gbps, double& max_gbps, int n_reps) {
   KPM_CUDA_CHECK(cudaEventCreate(&ev0));
   KPM_CUDA_CHECK(cudaEventCreate(&ev1));
 
-  std::vector<double> gbps;
-  gbps.reserve(n_reps);
+  TriadBenchResult res;
+  res.n_reps = n_reps;
+  res.reps_gbps.reserve(n_reps);
   const double bytes = 3.0 * sizeof(double) * n;
   for (int rep = 0; rep < n_reps + 1; ++rep) { // first rep is warmup
     KPM_CUDA_CHECK(cudaEventRecord(ev0));
@@ -334,7 +336,7 @@ double bench_triad_fp64(double& min_gbps, double& max_gbps, int n_reps) {
     float ms = 0.0f;
     KPM_CUDA_CHECK(cudaEventElapsedTime(&ms, ev0, ev1));
     if (rep > 0)
-      gbps.push_back(bytes / (static_cast<double>(ms) * 1e-3) / 1e9);
+      res.reps_gbps.push_back(bytes / (static_cast<double>(ms) * 1e-3) / 1e9);
   }
   cudaEventDestroy(ev0);
   cudaEventDestroy(ev1);
@@ -342,11 +344,12 @@ double bench_triad_fp64(double& min_gbps, double& max_gbps, int n_reps) {
   cudaFree(b);
   cudaFree(c);
 
-  const auto [lo, hi] = std::minmax_element(gbps.begin(), gbps.end());
-  min_gbps = *lo;
-  max_gbps = *hi;
-  std::sort(gbps.begin(), gbps.end());
-  return gbps[gbps.size() / 2];
+  std::vector<double> sorted = res.reps_gbps;
+  std::sort(sorted.begin(), sorted.end());
+  res.min_gbps = sorted.front();
+  res.max_gbps = sorted.back();
+  res.median_gbps = sorted[sorted.size() / 2];
+  return res;
 }
 
 double naive_bytes_per_moment(int nnz, int n, int real_bytes) {
@@ -361,15 +364,53 @@ double fused_bytes_per_moment(int nnz, int n, int real_bytes) {
   return matrix + 5.0 * real_bytes * n;
 }
 
-std::string gpu_device_name() {
+GpuDeviceInfo gpu_device_info() {
   int dev = 0;
   KPM_CUDA_CHECK(cudaGetDevice(&dev));
   cudaDeviceProp prop{};
   KPM_CUDA_CHECK(cudaGetDeviceProperties(&prop, dev));
-  return std::string(prop.name) + " (sm_" + std::to_string(prop.major) +
-         std::to_string(prop.minor) + ", " +
-         std::to_string(prop.multiProcessorCount) + " SMs, L2 " +
-         std::to_string(prop.l2CacheSize / (1024 * 1024)) + " MiB)";
+  GpuDeviceInfo info;
+  info.name = prop.name;
+  info.major = prop.major;
+  info.minor = prop.minor;
+  info.sm_count = prop.multiProcessorCount;
+  KPM_CUDA_CHECK(cudaDeviceGetAttribute(&info.clock_rate_khz,
+                                        cudaDevAttrClockRate, dev));
+  KPM_CUDA_CHECK(cudaDeviceGetAttribute(&info.memory_clock_rate_khz,
+                                        cudaDevAttrMemoryClockRate, dev));
+  KPM_CUDA_CHECK(cudaDeviceGetAttribute(&info.memory_bus_width_bits,
+                                        cudaDevAttrGlobalMemoryBusWidth, dev));
+  info.l2_bytes = prop.l2CacheSize;
+  info.global_mem_bytes = prop.totalGlobalMem;
+  KPM_CUDA_CHECK(cudaDriverGetVersion(&info.driver_version));
+  KPM_CUDA_CHECK(cudaRuntimeGetVersion(&info.runtime_version));
+  return info;
+}
+
+std::string gpu_device_name() {
+  const GpuDeviceInfo info = gpu_device_info();
+  return info.name + " (sm_" + std::to_string(info.major) +
+         std::to_string(info.minor) + ", " + std::to_string(info.sm_count) +
+         " SMs, L2 " + std::to_string(info.l2_bytes / (1024 * 1024)) +
+         " MiB)";
+}
+
+std::string gpu_toolchain() {
+  std::string s = "nvcc " + std::to_string(__CUDACC_VER_MAJOR__) + "." +
+                  std::to_string(__CUDACC_VER_MINOR__) + "." +
+                  std::to_string(__CUDACC_VER_BUILD__);
+#if defined(__clang__)
+  s += ", host clang " __VERSION__;
+#elif defined(__GNUC__)
+  s += ", host gcc " + std::to_string(__GNUC__) + "." +
+       std::to_string(__GNUC_MINOR__) + "." +
+       std::to_string(__GNUC_PATCHLEVEL__);
+#endif
+  s += ", c++" + std::to_string(__cplusplus / 100 % 100);
+#ifdef KPM_BUILD_TYPE
+  s += ", " KPM_BUILD_TYPE;
+#endif
+  return s;
 }
 
 } // namespace kpm

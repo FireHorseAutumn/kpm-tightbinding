@@ -56,8 +56,12 @@ is the dominant contribution.
 For the same seed and R=32, FP64 GPU moments match the CPU result to
 linf 1.1e-16. The random vectors and state vectors are bitwise identical by
 construction; only the dot-reduction order differs. Both kernels are checked at
-L=14, and the fused kernel is also checked at L=8, where the lattice has fewer
-sites than one 256-thread block.
+L=14; the fused kernel is also checked at L=8, where the lattice has fewer
+sites than one 256-thread block. Multi-block grids are covered at L=17
+(2 blocks, both kernels, linf 3.3e-16, with the two GPU modes differing by
+0.0 on this run)
+and at benchmark-class sizes L=128 (64 blocks) and L=256 (256 blocks) with
+reduced moment counts, linf 1.3e-14 and 6.6e-14.
 
 FP32 moments are within 1.9e-6 of the CPU FP64 reference. FP64 remains the
 default for the physics runs. CTest passes 2/2, including the analytic-traffic
@@ -68,24 +72,26 @@ regression test.
 The latest complete sweep used an RTX 5060 Laptop GPU (`sm_120`, 26 SMs,
 32 MiB L2), 1000 moments, R=4, device-side timing, and 11 repetitions per point.
 The per-moment `<r|t>` reduction is included in both modes. The measured FP64
-STREAM-like triad baseline is 269.4 GB/s, median [268.7, 269.5] over 20
+STREAM-like triad baseline is 347.9 GB/s, median [346.9, 348.8] over 20
 repetitions.
 
 FP64 microseconds per Chebyshev moment, median [min,max]:
 
 | L | N | naive | fused | naive/fused median-time ratio |
 |--:|--:|--:|--:|--:|
-| 16 | 256 | 8.18 [8.08, 8.31] | 5.46 [5.42, 5.50] | 1.50x |
-| 32 | 1024 | 8.19 [8.11, 8.30] | 5.46 [5.43, 5.54] | 1.50x |
-| 64 | 4096 | 8.23 [8.20, 8.33] | 5.51 [5.49, 5.54] | 1.49x |
-| 128 | 16384 | 8.13 [8.07, 8.19] | 6.91 [6.89, 6.91] | 1.18x |
-| 256 | 65536 | 19.27 [19.01, 19.29] | 23.06 [17.68, 23.14] | 0.84x |
-| 512 | 262144 | 87.73 [81.42, 117.84] | 88.23 [82.10, 91.39] | 0.99x |
+| 16 | 256 | 7.28 [7.10, 7.74] | 4.82 [4.78, 4.84] | 1.51x |
+| 32 | 1024 | 7.19 [7.10, 7.25] | 4.81 [4.80, 5.01] | 1.49x |
+| 64 | 4096 | 7.24 [7.18, 7.26] | 4.82 [4.80, 4.85] | 1.50x |
+| 128 | 16384 | 7.35 [7.34, 7.44] | 6.58 [6.58, 6.58] | 1.12x |
+| 256 | 65536 | 17.39 [17.38, 17.40] | 16.21 [16.21, 17.06] | 1.07x |
+| 512 | 262144 | 55.15 [55.14, 55.17] | 54.14 [54.05, 54.19] | 1.02x |
 
 At small sizes, three naive kernel launches per moment versus two fused launches
 put both paths on a latency floor. At larger sizes, the traffic model alone does
-not predict the timing ratio. The L=256 reversal and the spread at L=512 require
-controlled repetitions before any general large-size conclusion.
+not predict the timing ratio: this sweep narrows toward 1.0 at L=512, while the
+previous sweep showed an L=256 reversal at 0.84x. The large-size ratio is not
+stable across runs; controlled repetitions are required before any general
+large-size conclusion.
 
 The FP64 analytic traffic per moment is `matrix + 56n` for the naive path and
 `matrix + 40n` for the fused path. Fusion removes the global-memory round trip
@@ -93,15 +99,17 @@ of the intermediate `w`; it does not remove a second `t_n` read. The resulting
 vector-traffic ratio is 1.40, or 1.17 when matrix traffic is included. These are
 algorithmic byte counts, not hardware-counter measurements.
 
-Naive FP64 effective bandwidth reaches 120% of the measured triad at L=512 and
-136% at L=256, which is consistent with part of the traffic being served from
-L2. At L=512, fused FP32 takes 55.48 [54.95, 57.38] microseconds versus
-88.23 [82.10, 91.39] for FP64, a ratio of 1.59 rather than 2.
+Naive FP64 effective bandwidth reaches 147% of the measured triad at L=512 and
+117% at L=256, which is consistent with part of the traffic being served from
+L2. At L=512, fused FP32 takes 35.44 [35.44, 35.45] microseconds versus
+54.14 [54.05, 54.19] for FP64, a ratio of 1.53 rather than 2.
 
-The full FP32/FP64 results are in `data/kpm_gpu_bench.json`; the scaling plot is
-`data/kpm_gpu_scaling.png`. Same-day runs differ materially, so the table should
-be read as one measured sweep with observed spreads, not a stable speedup
-distribution.
+The full FP32/FP64 results, including per-repetition raw timings and
+device/driver/seed/toolchain metadata, are in `data/kpm_gpu_bench.json`; the
+scaling plot is `data/kpm_gpu_scaling.png`. Runs differ materially with machine
+state — a cold-start sweep showed small-size moment times roughly 4x higher
+with the triad unchanged — so the table should be read as one measured sweep
+with observed spreads, not a stable speedup distribution.
 
 ## HIP and local AMD results
 

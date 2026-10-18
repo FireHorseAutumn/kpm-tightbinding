@@ -51,6 +51,7 @@ target_compile_options(kpm_core PRIVATE -Wall -Wextra)
 add_library(kpm_gpu STATIC src/kpm_gpu.cu)
 target_include_directories(kpm_gpu PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(kpm_gpu PUBLIC kpm_core CUDA::cudart)
+target_compile_definitions(kpm_gpu PRIVATE KPM_BUILD_TYPE="${CMAKE_BUILD_TYPE}")
 
 add_executable(exact_diag src/exact_diag.cpp)
 target_link_libraries(exact_diag PRIVATE kpm_core Eigen3::Eigen)
