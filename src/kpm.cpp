@@ -15,9 +15,12 @@ constexpr double kPi = std::numbers::pi;
 // y = (A x - b x) / a, the rescaled Hamiltonian applied to x.
 void spmv_scaled(const CsrMatrix& A, double a, double b,
                  const std::vector<double>& x, std::vector<double>& y) {
-  spmv(A, x, y);
-  for (int i = 0; i < A.n; ++i)
-    y[i] = (y[i] - b * x[i]) / a;
+  for (int row = 0; row < A.n; ++row) {
+    double acc = 0.0;
+    for (int p = A.row_ptr[row]; p < A.row_ptr[row + 1]; ++p)
+      acc += A.values[p] * x[A.col_idx[p]];
+    y[row] = (acc - b * x[row]) / a;
+  }
 }
 
 double dot(const std::vector<double>& u, const std::vector<double>& v) {
@@ -86,6 +89,9 @@ kpm_dos(const std::vector<double>& moments,
   if (n_grid < 2)
     throw std::invalid_argument("kpm_dos: n_grid must be >= 2");
   const int n_cheb = static_cast<int>(moments.size()) - 1;
+  std::vector<double> w(n_cheb);
+  for (int n = 1; n <= n_cheb - 1; ++n)
+    w[n] = 2.0 * jackson[n] * moments[n];
   std::vector<std::pair<double, double>> out;
   out.reserve(n_grid);
   for (int k = 0; k < n_grid; ++k) {
@@ -94,7 +100,7 @@ kpm_dos(const std::vector<double>& moments,
     double sum = jackson[0] * moments[0];
     double t_prev = 1.0, t_cur = eps;
     for (int n = 1; n <= n_cheb - 1; ++n) {
-      sum += 2.0 * jackson[n] * moments[n] * t_cur;
+      sum += w[n] * t_cur;
       const double t_next = 2.0 * eps * t_cur - t_prev;
       t_prev = t_cur;
       t_cur = t_next;

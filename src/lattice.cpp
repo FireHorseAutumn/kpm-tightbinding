@@ -1,6 +1,5 @@
 #include "kpm/lattice.hpp"
 
-#include <algorithm>
 #include <stdexcept>
 
 namespace kpm {
@@ -41,7 +40,6 @@ CsrMatrix square_lattice(int L) {
 
 void spmv(const CsrMatrix& A, const std::vector<double>& x,
           std::vector<double>& y) {
-  std::fill(y.begin(), y.end(), 0.0);
   for (int row = 0; row < A.n; ++row) {
     double acc = 0.0;
     for (int p = A.row_ptr[row]; p < A.row_ptr[row + 1]; ++p)
