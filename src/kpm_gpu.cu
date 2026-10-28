@@ -139,6 +139,16 @@ public:
                int n_random, std::uint64_t seed)
       : n_(H.n), nnz_(H.nnz()), n_cheb_(n_cheb), n_random_(n_random),
         a_(static_cast<Real>(a)), b_(static_cast<Real>(b)) {
+    // Same KpmParams contract as the CPU path. Unchecked, n_cheb = 0 writes
+    // one scalar past the mu_dev_ allocation (sized n_cheb + 1) and
+    // n_random = 0 returns NaN moments.
+    if (n_cheb < 1)
+      throw std::invalid_argument("kpm_gpu: n_cheb must be >= 1");
+    if (n_random < 1)
+      throw std::invalid_argument("kpm_gpu: n_random must be >= 1");
+    if (a <= 4.0)
+      throw std::invalid_argument(
+          "kpm_gpu: a must exceed the spectral bound 4 (eta > 0)");
     // Random +/-1 slab, identical mt19937_64 sequence as the CPU path.
     std::mt19937_64 rng(seed);
     std::vector<Real> slab(static_cast<size_t>(n_) * n_random_);

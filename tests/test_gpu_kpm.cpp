@@ -8,6 +8,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -48,6 +49,30 @@ int main() {
         kpm::fused_bytes_per_moment(H.nnz(), H.n, 4) == matrix32 + 20.0 * H.n;
     check(traffic_ok, "R3/R4 analytic traffic model coefficients",
           "FP64: naive matrix+56n, fused matrix+40n; FP32: naive matrix+28n, fused matrix+20n");
+
+    // The GPU entry points must enforce the same KpmParams contract as the
+    // CPU path. Unchecked, n_cheb = 0 writes one scalar past the mu_dev
+    // allocation (sized n_cheb + 1) and n_random = 0 returns NaN moments.
+    const auto throws_invalid = [&H](kpm::KpmParams q) {
+      try {
+        kpm::chebyshev_moments_gpu(H, q, kpm::GpuKernelMode::Fused);
+      } catch (const std::invalid_argument&) {
+        return true;
+      }
+      return false;
+    };
+    kpm::KpmParams bad;
+    bad.n_cheb = 0;
+    check(throws_invalid(bad), "GPU rejects n_cheb = 0",
+          "expect invalid_argument");
+    bad = kpm::KpmParams{};
+    bad.n_random = 0;
+    check(throws_invalid(bad), "GPU rejects n_random = 0",
+          "expect invalid_argument");
+    bad = kpm::KpmParams{};
+    bad.a = 4.0;
+    check(throws_invalid(bad), "GPU rejects a <= spectral bound 4",
+          "expect invalid_argument");
 
     const auto mu_cpu = kpm::chebyshev_moments(H, p);
 
