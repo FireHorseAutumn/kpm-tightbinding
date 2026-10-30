@@ -115,6 +115,13 @@ int main() {
     std::snprintf(buf, sizeof buf, "linf |mu_gpu_fused - mu_cpu| = %.3e", d8);
     check(d8 < 1e-12, "R4 FP64 fused GPU moments match CPU (L=8, n < block)",
           buf);
+    const auto r8fd =
+        kpm::chebyshev_moments_gpu(H8, p, kpm::GpuKernelMode::FusedDot);
+    const double d8fd = linf_diff(r8fd.moments, mu8_cpu);
+    std::snprintf(buf, sizeof buf, "linf |mu_gpu_fused_dot - mu_cpu| = %.3e",
+                  d8fd);
+    check(d8fd < 1e-12,
+          "Fused-dot FP64 GPU moments match CPU (L=8, n < block)", buf);
 
     // ---------- L=17: n = 289 > kBlock, first multi-block grid ----------
     // Exercises the cross-block atomicAdd in the <r|t> reduction, which the
