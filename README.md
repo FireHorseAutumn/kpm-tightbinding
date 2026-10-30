@@ -96,8 +96,20 @@ large-size conclusion.
 The FP64 analytic traffic per moment is `matrix + 56n` for the naive path and
 `matrix + 40n` for the fused path. Fusion removes the global-memory round trip
 of the intermediate `w`; it does not remove a second `t_n` read. The resulting
-vector-traffic ratio is 1.40, or 1.17 when matrix traffic is included. These are
-algorithmic byte counts, not hardware-counter measurements.
+vector-traffic ratio is 1.40, or 1.17 when matrix traffic is included. Nsight
+Compute counters at L=512 (2026-10-30, dram__bytes/lts__t_bytes per launch)
+match the model: the fused kernel's measured LTS saving over
+SpMV+recurrence is 4.21 MB — exactly one w write + reread (2 x 2.097 MB) —
+and the dot kernel's 4.20 MB DRAM per launch is exactly two vector reads.
+
+A third mode, fused-dot (`GpuKernelMode::FusedDot`, bench flag
+`--with-fused-dot`), folds the per-moment `<r|t>` reduction into the fused
+kernel with the same shared-memory reduction tree over the same per-element
+products; gated bitwise-consistent with the fused path (worst linf vs CPU
+6.6e-14 at L=256, unchanged). Measured on the pinned governor 2026-10-30:
+1.28x over fused at L=16–64 (one fewer launch and no t_next reread per
+moment — the launch-latency floor regime), decaying to 1.17x at L=128, 1.04x
+at L=256, and 1.02x at L=512 where neither path is DRAM-bound.
 
 Naive FP64 effective bandwidth reaches 147% of the measured triad at L=512 and
 117% at L=256, which is consistent with part of the traffic being served from

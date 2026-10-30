@@ -25,6 +25,8 @@ struct SizeEntry {
   int n;
   int nnz;
   kpm::GpuBenchResult fp64_naive, fp64_fused, fp32_naive, fp32_fused;
+  kpm::GpuBenchResult fp64_fused_dot{}, fp32_fused_dot{};
+  bool with_fused_dot = false;
 };
 
 std::vector<int> parse_sizes(const std::string& s) {
@@ -84,6 +86,7 @@ int main(int argc, char** argv) {
   kpm::KpmParams p;
   p.n_random = 4; // timing only; the R factor is identical work per moment
   int n_reps = 11;
+  bool with_fused_dot = false;
   int triad_reps = 20;
   std::string out_path = std::string(KPM_DATA_DIR) + "/kpm_gpu_bench.json";
   for (int i = 1; i < argc; ++i) {
@@ -98,6 +101,8 @@ int main(int argc, char** argv) {
         n_reps = std::stoi(argv[i] + 7);
       else if (std::strncmp(argv[i], "--triad-reps=", 13) == 0)
         triad_reps = std::stoi(argv[i] + 13);
+      else if (std::strcmp(argv[i], "--with-fused-dot") == 0)
+        with_fused_dot = true;
       else if (std::strncmp(argv[i], "--out=", 6) == 0)
         out_path = argv[i] + 6;
       else
@@ -107,7 +112,8 @@ int main(int argc, char** argv) {
       std::fprintf(stderr, "bench_kpm: %s\n", e.what());
       std::fprintf(stderr,
                    "usage: bench_kpm [--sizes=16,32,64,128] [--n-cheb=1000] "
-                   "[--R=4] [--reps=11] [--triad-reps=20] [--out=PATH]\n");
+                   "[--R=4] [--reps=11] [--triad-reps=20] [--with-fused-dot] "
+                   "[--out=PATH]\n");
       return 1;
     }
   }
@@ -142,6 +148,13 @@ int main(int argc, char** argv) {
                                               n_reps),
                   kpm::bench_moment_loop_fp32(H, p, kpm::GpuKernelMode::Fused,
                                               n_reps)};
+      e.with_fused_dot = with_fused_dot;
+      if (with_fused_dot) {
+        e.fp64_fused_dot = kpm::bench_moment_loop_fp64(
+            H, p, kpm::GpuKernelMode::FusedDot, n_reps);
+        e.fp32_fused_dot = kpm::bench_moment_loop_fp32(
+            H, p, kpm::GpuKernelMode::FusedDot, n_reps);
+      }
       entries.push_back(e);
 
       const double bn64 = kpm::naive_bytes_per_moment(H.nnz(), H.n, 8);
@@ -166,6 +179,15 @@ int main(int argc, char** argv) {
                   e.fp32_naive.max_s / (p.n_cheb * p.n_random) * 1e6,
                   e.fp32_fused.min_s / (p.n_cheb * p.n_random) * 1e6,
                   e.fp32_fused.max_s / (p.n_cheb * p.n_random) * 1e6);
+      if (e.with_fused_dot) {
+        const double tfd = s_per_moment(e.fp64_fused_dot, p.n_cheb, p.n_random);
+        std::printf("     fused-dot us/moment: f64 %.3f (vs fused %5.2fx) f32 "
+                    "%.3f | spread f64 [%.3f,%.3f]\n",
+                    tfd * 1e6, tf / tfd,
+                    s_per_moment(e.fp32_fused_dot, p.n_cheb, p.n_random) * 1e6,
+                    e.fp64_fused_dot.min_s / (p.n_cheb * p.n_random) * 1e6,
+                    e.fp64_fused_dot.max_s / (p.n_cheb * p.n_random) * 1e6);
+      }
     }
 
     std::ofstream f(out_path);
@@ -213,12 +235,22 @@ int main(int argc, char** argv) {
       f << ",\n     \"fused\": ";
       json_result(f, e.fp64_fused, p.n_cheb, p.n_random,
                   kpm::fused_bytes_per_moment(e.nnz, e.n, 8), 16);
+      if (e.with_fused_dot) {
+        f << ",\n     \"fused_dot\": ";
+        json_result(f, e.fp64_fused_dot, p.n_cheb, p.n_random,
+                    kpm::fused_dot_bytes_per_moment(e.nnz, e.n, 8), 16);
+      }
       f << "},\n     \"fp32\": {\"naive\": ";
       json_result(f, e.fp32_naive, p.n_cheb, p.n_random,
                   kpm::naive_bytes_per_moment(e.nnz, e.n, 4), 16);
       f << ",\n     \"fused\": ";
       json_result(f, e.fp32_fused, p.n_cheb, p.n_random,
                   kpm::fused_bytes_per_moment(e.nnz, e.n, 4), 16);
+      if (e.with_fused_dot) {
+        f << ",\n     \"fused_dot\": ";
+        json_result(f, e.fp32_fused_dot, p.n_cheb, p.n_random,
+                    kpm::fused_dot_bytes_per_moment(e.nnz, e.n, 4), 16);
+      }
       f << "}}" << (i + 1 < entries.size() ? "," : "") << "\n";
     }
     f << "  ]\n}\n";

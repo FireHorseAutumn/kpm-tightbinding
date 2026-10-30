@@ -99,6 +99,45 @@ __global__ void fused_moment_kernel(const int n,
   t_next[row] = static_cast<Real>(2) * w - t_prev[row];
 }
 
+// Fused-dot kernel: SpMV + recurrence + the <r|t_next> block reduction in
+// one launch. The dot uses the same kBlock-wide shared-memory tree and
+// double accumulation as dot_kernel over the same per-element products, so
+// per-block partial sums are identical values; what changes is one fewer
+// launch and no t_next reread per moment.
+template <typename Real>
+__global__ void fused_moment_dot_kernel(const int n,
+                                        const int* __restrict__ row_ptr,
+                                        const int* __restrict__ col_idx,
+                                        const Real* __restrict__ vals,
+                                        const Real a, const Real b,
+                                        const Real* __restrict__ x,
+                                        const Real* __restrict__ t_prev,
+                                        const Real* __restrict__ r,
+                                        Real* __restrict__ t_next,
+                                        double* __restrict__ out) {
+  __shared__ double sdot[kBlock];
+  const int row = blockIdx.x * blockDim.x + threadIdx.x;
+  Real t = 0;
+  if (row < n) {
+    Real acc = 0;
+    for (int p = row_ptr[row]; p < row_ptr[row + 1]; ++p)
+      acc += vals[p] * x[col_idx[p]];
+    const Real w = (acc - b * x[row]) / a;
+    t = static_cast<Real>(2) * w - t_prev[row];
+    t_next[row] = t;
+  }
+  sdot[threadIdx.x] =
+      (row < n) ? static_cast<double>(r[row]) * static_cast<double>(t) : 0.0;
+  __syncthreads();
+  for (int s = kBlock / 2; s > 0; s >>= 1) {
+    if (threadIdx.x < s)
+      sdot[threadIdx.x] += sdot[threadIdx.x + s];
+    __syncthreads();
+  }
+  if (threadIdx.x == 0)
+    atomicAdd(out, sdot[0]);
+}
+
 // <u|v> partial block reduction; one atomicAdd per block into `out`.
 // Accumulates in double even for Real = float: one scalar per moment,
 // negligible cost, keeps the stochastic-trace reduction from adding FP32
@@ -222,14 +261,21 @@ public:
           KPM_CUDA_CHECK(cudaGetLastError());
           recurrence_kernel<<<grid, kBlock>>>(n_, w_, t_prev_, t_next_);
           KPM_CUDA_CHECK(cudaGetLastError());
-        } else {
+          dot_kernel<<<grid, kBlock>>>(n_, rvec, t_next_, mu_dev_ + k + 1);
+          KPM_CUDA_CHECK(cudaGetLastError());
+        } else if (mode == kpm::GpuKernelMode::Fused) {
           fused_moment_kernel<<<grid, kBlock>>>(n_, row_ptr_, col_idx_, vals_,
                                                 a_, b_, t_cur_, t_prev_,
                                                 t_next_);
           KPM_CUDA_CHECK(cudaGetLastError());
+          dot_kernel<<<grid, kBlock>>>(n_, rvec, t_next_, mu_dev_ + k + 1);
+          KPM_CUDA_CHECK(cudaGetLastError());
+        } else {
+          fused_moment_dot_kernel<<<grid, kBlock>>>(
+              n_, row_ptr_, col_idx_, vals_, a_, b_, t_cur_, t_prev_, rvec,
+              t_next_, mu_dev_ + k + 1);
+          KPM_CUDA_CHECK(cudaGetLastError());
         }
-        dot_kernel<<<grid, kBlock>>>(n_, rvec, t_next_, mu_dev_ + k + 1);
-        KPM_CUDA_CHECK(cudaGetLastError());
         std::swap(t_prev_, t_cur_);
         std::swap(t_cur_, t_next_);
       }
@@ -372,6 +418,14 @@ double fused_bytes_per_moment(int nnz, int n, int real_bytes) {
   const double matrix =
       static_cast<double>(nnz) * (real_bytes + 4) + 4.0 * (n + 1);
   return matrix + 5.0 * real_bytes * n;
+}
+
+double fused_dot_bytes_per_moment(int nnz, int n, int real_bytes) {
+  // Fused kernel (x, t_prev reads + t_next write) with the r read folded in;
+  // the dot's t_next reread is gone: 4 vector touches, not 5.
+  const double matrix =
+      static_cast<double>(nnz) * (real_bytes + 4) + 4.0 * (n + 1);
+  return matrix + 4.0 * real_bytes * n;
 }
 
 GpuDeviceInfo gpu_device_info() {

@@ -14,6 +14,9 @@ enum class GpuKernelMode {
          // SpMV output w round-trips through global memory every moment.
   Fused, // R4: SpMV + recurrence in one kernel; w lives in a register and
          // never touches global memory.
+  FusedDot, // Fused + the <r|t_next> block reduction in one launch (same
+            // reduction tree as the standalone dot kernel); the dot's
+            // t_next reread never touches global memory.
 };
 
 /// Result of a full GPU moment run.
@@ -76,6 +79,7 @@ TriadBenchResult bench_triad_fp64(int n_reps);
 /// practice). real_bytes = 8 (FP64) or 4 (FP32). Derivation in kpm_gpu.cu.
 double naive_bytes_per_moment(int nnz, int n, int real_bytes);
 double fused_bytes_per_moment(int nnz, int n, int real_bytes);
+double fused_dot_bytes_per_moment(int nnz, int n, int real_bytes);
 
 /// Device properties plus driver/runtime versions, for benchmark metadata.
 /// Clock rates are the device-reported maxima, not live measurements.

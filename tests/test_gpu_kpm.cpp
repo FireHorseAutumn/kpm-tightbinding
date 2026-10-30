@@ -87,6 +87,13 @@ int main() {
     std::snprintf(buf, sizeof buf, "linf |mu_gpu_fused - mu_cpu| = %.3e", d64f);
     check(d64f < 1e-12, "R4 FP64 fused GPU moments match CPU (L=14)", buf);
 
+    const auto r64fd =
+        kpm::chebyshev_moments_gpu(H, p, kpm::GpuKernelMode::FusedDot);
+    const double d64fd = linf_diff(r64fd.moments, mu_cpu);
+    std::snprintf(buf, sizeof buf, "linf |mu_gpu_fused_dot - mu_cpu| = %.3e",
+                  d64fd);
+    check(d64fd < 1e-12, "Fused-dot FP64 GPU moments match CPU (L=14)", buf);
+
     const auto r32n =
         kpm::chebyshev_moments_gpu_fp32(H, p, kpm::GpuKernelMode::Naive);
     const auto r32f =
@@ -133,6 +140,20 @@ int main() {
     std::snprintf(buf, sizeof buf, "linf |mu_naive - mu_fused| = %.3e", d17nf);
     check(d17nf < 1e-14, "R3/R4 GPU moments agree (L=17, multi-block)", buf);
 
+    // FusedDot folds the dot into the fused kernel with the same reduction tree
+    // over the same per-element products.
+    const auto r17fd =
+        kpm::chebyshev_moments_gpu(H17, p, kpm::GpuKernelMode::FusedDot);
+    const double d17fd = linf_diff(r17fd.moments, mu17_cpu);
+    std::snprintf(buf, sizeof buf, "linf |mu_gpu_fused_dot - mu_cpu| = %.3e",
+                  d17fd);
+    check(d17fd < 1e-13,
+          "Fused-dot FP64 GPU moments match CPU (L=17, multi-block)", buf);
+    const double d17ffd = linf_diff(r17f.moments, r17fd.moments);
+    std::snprintf(buf, sizeof buf, "linf |mu_fused - mu_fused_dot| = %.3e",
+                  d17ffd);
+    check(d17ffd < 1e-14, "R4 fused vs fused-dot GPU moments agree (L=17, multi-block)", buf);
+
     // ---------- large sizes: benchmark-class grids, reduced moment work ----------
     // CPU oracle stays cheap at these n_cheb/R; the point is the grid path,
     // not statistics. Looser bound than L<=17: the reduction sums more terms
@@ -148,11 +169,18 @@ int main() {
         kpm::chebyshev_moments_gpu(H128, p128, kpm::GpuKernelMode::Fused);
     const double d128n = linf_diff(r128n.moments, mu128_cpu);
     const double d128f = linf_diff(r128f.moments, mu128_cpu);
+    const auto r128fd =
+        kpm::chebyshev_moments_gpu(H128, p128, kpm::GpuKernelMode::FusedDot);
+    const double d128fd = linf_diff(r128fd.moments, mu128_cpu);
     std::snprintf(buf, sizeof buf,
                   "linf |mu_gpu - mu_cpu|: naive %.3e, fused %.3e", d128n,
                   d128f);
     check(d128n < 1e-12 && d128f < 1e-12,
           "FP64 GPU moments match CPU (L=128, 64 blocks)", buf);
+    std::snprintf(buf, sizeof buf,
+                  "linf |mu_gpu_fused_dot - mu_cpu| = %.3e", d128fd);
+    check(d128fd < 1e-12,
+          "Fused-dot FP64 GPU moments match CPU (L=128, 64 blocks)", buf);
 
     kpm::KpmParams p256;
     p256.n_cheb = 64;
@@ -166,6 +194,13 @@ int main() {
                   d256f);
     check(d256f < 1e-12, "FP64 fused GPU moments match CPU (L=256, 256 blocks)",
           buf);
+    const auto r256fd =
+        kpm::chebyshev_moments_gpu(H256, p256, kpm::GpuKernelMode::FusedDot);
+    const double d256fd = linf_diff(r256fd.moments, mu256_cpu);
+    std::snprintf(buf, sizeof buf, "linf |mu_gpu_fused_dot - mu_cpu| = %.3e",
+                  d256fd);
+    check(d256fd < 1e-12,
+          "Fused-dot FP64 GPU moments match CPU (L=256, 256 blocks)", buf);
   } catch (const std::exception& e) {
     std::fprintf(stderr, "test_gpu_kpm failed: %s\n", e.what());
     return 1;
